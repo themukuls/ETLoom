@@ -1,0 +1,30 @@
+version: 1
+
+connections:
+  source_postgres:
+    type: postgres
+    host: ${SOURCE_DB_HOST:-localhost}
+    port: 5432
+    database: ${SOURCE_DB_NAME:-etl_source}
+    username: ${SOURCE_DB_USER:-yamlflow}
+    password: ${SOURCE_DB_PASSWORD}
+    sslmode: ${SOURCE_DB_SSLMODE:-prefer}
+
+  target_postgres:
+    type: postgres
+    host: ${TARGET_DB_HOST:-localhost}
+    port: 5432
+    database: ${TARGET_DB_NAME:-etl_target}
+    username: ${TARGET_DB_USER:-yamlflow}
+    password: ${TARGET_DB_PASSWORD}
+    sslmode: ${TARGET_DB_SSLMODE:-prefer}
+
+  control_postgres:
+    type: postgres
+    host: ${CONTROL_DB_HOST:-localhost}
+    port: 5432
+    database: ${CONTROL_DB_NAME:-etl_control}
+    username: ${CONTROL_DB_USER:-yamlflow}
+    password: ${CONTROL_DB_PASSWORD}
+    sslmode: ${CONTROL_DB_SSLMODE:-prefer}
+

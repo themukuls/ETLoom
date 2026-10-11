@@ -1,0 +1,94 @@
+version: 1
+
+pipeline:
+  id: clean_transactions
+  name: Clean Transactions
+  description: Incrementally cleans successful payments for analytics.
+  owner: data-engineering
+  tags: [payments, demo]
+  enabled: true
+
+source:
+  connection: source_postgres
+  type: table
+  schema: source
+  table: transactions
+  columns:
+    - transaction_id
+    - merchant_id
+    - transaction_status
+    - amount
+    - refund_amount
+    - transaction_timestamp
+    - updated_at
+  incremental:
+    strategy: watermark
+    column: updated_at
+    initial_value: "2026-01-01T00:00:00+00:00"
+    lookback_seconds: 300
+  extraction:
+    chunk_size: 5000
+    order_by: [updated_at, transaction_id]
+
+transformations:
+  - name: retain_successful_payments
+    type: filter
+    params:
+      column: transaction_status
+      operator: equals
+      value: SUCCESS
+
+  - name: calculate_net_amount
+    type: derive
+    params:
+      operation: subtract
+      columns: [amount, refund_amount]
+      output_column: net_amount
+
+  - name: derive_transaction_date
+    type: derive
+    params:
+      operation: date
+      columns: [transaction_timestamp]
+      output_column: transaction_date
+
+  - name: remove_duplicate_transactions
+    type: deduplicate
+    params:
+      keys: [transaction_id]
+
+quality:
+  row_level:
+    - name: required_identifiers
+      type: not_null
+      columns: [transaction_id, merchant_id]
+      on_failure: quarantine
+
+    - name: amount_is_non_negative
+      type: range
+      columns: [amount]
+      params:
+        minimum: 0
+      on_failure: quarantine
+
+  dataset_level:
+    - name: transaction_id_is_unique_per_batch
+      type: uniqueness
+      columns: [transaction_id]
+      on_failure: fail
+
+target:
+  connection: target_postgres
+  type: table
+  schema: analytics
+  table: clean_transactions
+  load:
+    mode: merge
+    keys: [transaction_id]
+    batch_size: 5000
+
+runtime:
+  max_retries: 3
+  retry_delay_seconds: 2
+  retry_backoff_multiplier: 2
+
