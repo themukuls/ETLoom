@@ -1,30 +1,48 @@
-version: 1
+api_version: etloom/v1
+kind: connections
 
 connections:
   source_postgres:
-    type: postgres
+    type: postgresql
     host: ${SOURCE_DB_HOST:-localhost}
     port: 5432
-    database: ${SOURCE_DB_NAME:-etl_source}
-    username: ${SOURCE_DB_USER:-yamlflow}
+    database: ${SOURCE_DB_NAME:-postgres}
+    username: ${SOURCE_DB_USER:-postgres}
     password: ${SOURCE_DB_PASSWORD}
-    sslmode: ${SOURCE_DB_SSLMODE:-prefer}
+    options:
+      sslmode: ${SOURCE_DB_SSLMODE:-prefer}
+      connect_timeout_seconds: 10
+      application_name: etloom-source
+    pool:
+      minimum_connections: 1
+      maximum_connections: 5
 
   target_postgres:
-    type: postgres
+    type: postgresql
     host: ${TARGET_DB_HOST:-localhost}
     port: 5432
-    database: ${TARGET_DB_NAME:-etl_target}
-    username: ${TARGET_DB_USER:-yamlflow}
+    database: ${TARGET_DB_NAME:-postgres}
+    username: ${TARGET_DB_USER:-postgres}
     password: ${TARGET_DB_PASSWORD}
-    sslmode: ${TARGET_DB_SSLMODE:-prefer}
+    options:
+      sslmode: ${TARGET_DB_SSLMODE:-prefer}
+      connect_timeout_seconds: 10
+      application_name: etloom-target
+    pool:
+      minimum_connections: 1
+      maximum_connections: 5
 
   control_postgres:
-    type: postgres
+    type: postgresql
     host: ${CONTROL_DB_HOST:-localhost}
     port: 5432
-    database: ${CONTROL_DB_NAME:-etl_control}
-    username: ${CONTROL_DB_USER:-yamlflow}
+    database: ${CONTROL_DB_NAME:-postgres}
+    username: ${CONTROL_DB_USER:-postgres}
     password: ${CONTROL_DB_PASSWORD}
-    sslmode: ${CONTROL_DB_SSLMODE:-prefer}
-
+    options:
+      sslmode: ${CONTROL_DB_SSLMODE:-prefer}
+      connect_timeout_seconds: 10
+      application_name: etloom-control
+    pool:
+      minimum_connections: 1
+      maximum_connections: 5

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run_id[:8] }} · ETLoom{% endblock %}
+{% block content %}
+  <a class="back-link" href="/">← Dashboard</a>
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">LIVE EXECUTION</p>
+      <h1>Pipeline run</h1>
+      <code>{{ run_id }}</code>
+    </div>
+    <span id="run-status" class="pill running">Connecting</span>
+  </section>
+
+  <div class="run-layout">
+    <section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">TIMELINE</p><h2>Execution steps</h2></div></div>
+      <div id="timeline" class="timeline"><div class="empty-state">Waiting for the runner…</div></div>
+    </section>
+    <section class="panel logs-panel">
+      <div class="panel-heading"><div><p class="eyebrow">STREAM</p><h2>Live logs</h2></div><button id="clear-logs" class="text-button">Clear</button></div>
+      <pre id="logs">Connecting to ETLoom event stream…
+</pre>
+    </section>
+  </div>
+  <script>window.ETLOOM_RUN_ID = {{ run_id|tojson }};</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/run_monitor.js') }}"></script>{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}ETLoom · Pipelines{% endblock %}
+{% block content %}
+  <section class="hero">
+    <div>
+      <p class="eyebrow">PYTHON-FIRST DATA PLATFORM</p>
+      <h1>Weave reliable pipelines<br>from readable YAML.</h1>
+      <p class="lede">Configure PostgreSQL inputs, outputs and SQL data-quality checks. Run locally and follow every step live.</p>
+    </div>
+    <div class="hero-stat">
+      <strong>{{ pipelines|length }}</strong>
+      <span>Configured pipelines</span>
+    </div>
+  </section>
+
+  <section class="section-heading">
+    <div>
+      <p class="eyebrow">WORKSPACE</p>
+      <h2>Pipelines</h2>
+    </div>
+    <a class="button secondary" href="/docs">Open API docs</a>
+  </section>
+
+  <div class="pipeline-grid">
+    {% for pipeline in pipelines %}
+      <article class="pipeline-card">
+        <div class="card-topline">
+          <span class="pill {{ 'success' if pipeline.enabled else 'muted' }}">
+            {{ 'Enabled' if pipeline.enabled else 'Disabled' }}
+          </span>
+          <span>{{ pipeline.dq_checks }} DQ checks</span>
+        </div>
+        <h3>{{ pipeline.name }}</h3>
+        <p>{{ pipeline.description }}</p>
+        <div class="route-line">
+          <code>{{ pipeline.source }}</code>
+          <span>→</span>
+          <code>{{ pipeline.target }}</code>
+        </div>
+        <a class="button primary full" href="/pipelines/{{ pipeline.id }}">Open pipeline</a>
+      </article>
+    {% else %}
+      <div class="empty-state">No pipeline YAML files were found in <code>config/pipelines</code>.</div>
+    {% endfor %}
+  </div>
+{% endblock %}

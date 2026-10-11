@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ pipeline.metadata.name }} · ETLoom{% endblock %}
+{% block content %}
+  <a class="back-link" href="/">← All pipelines</a>
+  <section class="page-heading">
+    <div>
+      <p class="eyebrow">PIPELINE</p>
+      <h1>{{ pipeline.metadata.name }}</h1>
+      <p>{{ pipeline.metadata.description }}</p>
+    </div>
+    <div class="actions">
+      <button class="button secondary" id="validate-button">Validate</button>
+      <button class="button secondary" id="save-button">Save YAML</button>
+      <button class="button primary" id="run-button">Run pipeline</button>
+    </div>
+  </section>
+
+  <div class="summary-grid">
+    <div class="summary-card"><span>Input</span><strong>{{ pipeline.input.object.schema_name }}.{{ pipeline.input.object.table }}</strong></div>
+    <div class="summary-card"><span>Output</span><strong>{{ pipeline.output.object.schema_name }}.{{ pipeline.output.object.table }}</strong></div>
+    <div class="summary-card"><span>Mode</span><strong>{{ pipeline.input.extraction.mode }}</strong></div>
+    <div class="summary-card"><span>DQ checks</span><strong>{{ pipeline.data_quality.checks|length }}</strong></div>
+  </div>
+
+  <div class="editor-layout">
+    <section class="panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">CONFIGURATION</p><h2>Pipeline YAML</h2></div>
+        <span id="editor-state" class="pill muted">Not modified</span>
+      </div>
+      <textarea id="yaml-editor" spellcheck="false">{{ yaml_content }}</textarea>
+      <div id="message" class="message hidden"></div>
+    </section>
+
+    <aside class="panel checks-panel">
+      <div class="panel-heading"><div><p class="eyebrow">QUALITY</p><h2>SQL checks</h2></div></div>
+      {% for check in pipeline.data_quality.checks %}
+        <div class="check-card">
+          <div><span class="pill stage">{{ check.stage }}</span><span class="pill muted">{{ check.type }}</span></div>
+          <strong>{{ check.name }}</strong>
+          <span>On failure: {{ check.on_failure }}</span>
+        </div>
+      {% else %}
+        <p>No DQ checks configured.</p>
+      {% endfor %}
+    </aside>
+  </div>
+  <script>window.ETLOOM_PIPELINE_ID = {{ pipeline_id|tojson }};</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='/js/pipeline_editor.js') }}"></script>{% endblock %}

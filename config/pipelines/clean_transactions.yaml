@@ -1,18 +1,20 @@
-version: 1
+api_version: etloom/v1
+kind: pipeline
 
-pipeline:
+metadata:
   id: clean_transactions
   name: Clean Transactions
-  description: Incrementally cleans successful payments for analytics.
+  description: Cleans successful payment transactions for analytics.
   owner: data-engineering
-  tags: [payments, demo]
+  tags: [payments, analytics, demo]
   enabled: true
 
-source:
+input:
+  type: postgresql
   connection: source_postgres
-  type: table
-  schema: source
-  table: transactions
+  object:
+    schema: source
+    table: transactions
   columns:
     - transaction_id
     - merchant_id
@@ -21,74 +23,216 @@ source:
     - refund_amount
     - transaction_timestamp
     - updated_at
-  incremental:
-    strategy: watermark
-    column: updated_at
-    initial_value: "2026-01-01T00:00:00+00:00"
-    lookback_seconds: 300
+  filter:
+    sql: |
+      transaction_status = 'SUCCESS'
   extraction:
-    chunk_size: 5000
-    order_by: [updated_at, transaction_id]
+    mode: incremental
+    incremental:
+      strategy: watermark
+      watermark_column: updated_at
+      initial_value: "2026-01-01T00:00:00+00:00"
+      lookback_seconds: 300
+      tie_breaker:
+        column: transaction_id
+    order_by:
+      - column: updated_at
+        direction: ascending
+      - column: transaction_id
+        direction: ascending
+    batch_size: 5000
+    fetch_timeout_seconds: 300
 
 transformations:
-  - name: retain_successful_payments
-    type: filter
-    params:
-      column: transaction_status
-      operator: equals
-      value: SUCCESS
-
-  - name: calculate_net_amount
-    type: derive
-    params:
-      operation: subtract
+  - id: calculate_net_amount
+    type: derive_column
+    output_column: net_amount
+    operation:
+      name: subtract
       columns: [amount, refund_amount]
-      output_column: net_amount
+      null_handling:
+        refund_amount: 0
 
-  - name: derive_transaction_date
-    type: derive
-    params:
-      operation: date
-      columns: [transaction_timestamp]
-      output_column: transaction_date
+  - id: derive_transaction_date
+    type: derive_column
+    output_column: transaction_date
+    operation:
+      name: date
+      column: transaction_timestamp
 
-  - name: remove_duplicate_transactions
+  - id: remove_duplicate_transactions
     type: deduplicate
-    params:
-      keys: [transaction_id]
+    keys: [transaction_id]
+    retain:
+      order_by: updated_at
+      direction: descending
 
-quality:
-  row_level:
-    - name: required_identifiers
-      type: not_null
-      columns: [transaction_id, merchant_id]
-      on_failure: quarantine
+output:
+  type: postgresql
+  connection: target_postgres
+  object:
+    schema: analytics
+    table: clean_transactions
+  write:
+    mode: merge
+    merge_keys: [transaction_id]
+    update_columns:
+      - merchant_id
+      - transaction_status
+      - amount
+      - refund_amount
+      - transaction_timestamp
+      - updated_at
+      - net_amount
+      - transaction_date
+    staging:
+      enabled: true
+      schema: etloom_staging
+      table_prefix: clean_transactions
+    transaction:
+      atomic: true
+      isolation_level: read_committed
+    schema_policy:
+      create_table_if_missing: false
+      allow_new_columns: false
+      allow_missing_columns: false
+      allow_type_changes: false
 
-    - name: amount_is_non_negative
-      type: range
-      columns: [amount]
-      params:
-        minimum: 0
-      on_failure: quarantine
-
-  dataset_level:
-    - name: transaction_id_is_unique_per_batch
-      type: uniqueness
-      columns: [transaction_id]
+data_quality:
+  defaults:
+    timeout_seconds: 60
+    on_error: fail
+  checks:
+    - id: source_has_records
+      name: Source contains successful transactions
+      stage: pre_extract
+      type: scalar_sql
+      connection: source_postgres
+      sql: |
+        SELECT COUNT(*) AS row_count
+        FROM {{ source }}
+        WHERE transaction_status = 'SUCCESS'
+      expectation:
+        column: row_count
+        operator: greater_than
+        value: 0
+      severity: error
       on_failure: fail
 
-target:
-  connection: target_postgres
-  type: table
-  schema: analytics
-  table: clean_transactions
-  load:
-    mode: merge
-    keys: [transaction_id]
-    batch_size: 5000
+    - id: required_transaction_fields
+      name: Transaction and merchant IDs are populated
+      stage: post_transform
+      type: failing_rows_sql
+      sql: |
+        SELECT *
+        FROM {{ staging }}
+        WHERE transaction_id IS NULL
+           OR merchant_id IS NULL
+      expectation:
+        operator: row_count_equals
+        value: 0
+      severity: error
+      on_failure: quarantine
+
+    - id: amount_is_non_negative
+      name: Transaction amount is non-negative
+      stage: post_transform
+      type: failing_rows_sql
+      sql: |
+        SELECT *
+        FROM {{ staging }}
+        WHERE amount < 0
+      expectation:
+        operator: row_count_equals
+        value: 0
+      severity: error
+      on_failure: quarantine
+
+    - id: transaction_id_is_unique
+      name: Transaction ID is unique in the staged batch
+      stage: pre_load
+      type: scalar_sql
+      sql: |
+        SELECT COUNT(*) AS duplicate_groups
+        FROM (
+          SELECT transaction_id
+          FROM {{ staging }}
+          GROUP BY transaction_id
+          HAVING COUNT(*) > 1
+        ) duplicates
+      expectation:
+        column: duplicate_groups
+        operator: equals
+        value: 0
+      severity: error
+      on_failure: fail
+
+    - id: target_has_no_null_keys
+      name: Target has no null transaction IDs
+      stage: post_load
+      type: scalar_sql
+      connection: target_postgres
+      sql: |
+        SELECT COUNT(*) AS failed_count
+        FROM {{ target }}
+        WHERE transaction_id IS NULL
+      expectation:
+        column: failed_count
+        operator: equals
+        value: 0
+      severity: error
+      on_failure: fail
+
+quarantine:
+  enabled: true
+  connection: control_postgres
+  object:
+    schema: etloom
+    table: rejected_records
+  include:
+    - pipeline_id
+    - run_id
+    - check_id
+    - rejection_reason
+    - source_record
+    - rejected_at
+
+checkpoint:
+  enabled: true
+  connection: control_postgres
+  update_policy: after_successful_commit
 
 runtime:
-  max_retries: 3
-  retry_delay_seconds: 2
-  retry_backoff_multiplier: 2
+  timeout_seconds: 1800
+  retry:
+    enabled: true
+    maximum_attempts: 3
+    initial_delay_seconds: 2
+    backoff_multiplier: 2
+    maximum_delay_seconds: 30
+  failure_policy:
+    rollback_target: true
+    preserve_staging_data: true
+    advance_checkpoint: false
+  resources:
+    maximum_memory_mb: 1024
+    maximum_parallel_batches: 1
 
+observability:
+  logging:
+    level: INFO
+    format: json
+  metrics:
+    enabled: true
+    capture:
+      - extracted_rows
+      - transformed_rows
+      - rejected_rows
+      - inserted_rows
+      - updated_rows
+      - execution_duration_seconds
+      - source_watermark
+      - target_watermark
+  audit:
+    enabled: true
+    retain_run_history_days: 90

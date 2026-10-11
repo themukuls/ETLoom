@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ETLoom: Web UI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "etloom.cli.main",
+      "args": ["serve", "--reload"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "ETLoom: Run sample pipeline",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "etloom.cli.main",
+      "args": [
+        "run",
+        "config/pipelines/clean_transactions.yaml",
+        "--connections",
+        "config/connections.yaml"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

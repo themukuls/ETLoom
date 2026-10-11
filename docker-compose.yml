@@ -2,20 +2,20 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: yamlflow
-      POSTGRES_PASSWORD: yamlflow_dev
+      POSTGRES_USER: etloom
+      POSTGRES_PASSWORD: etloom_dev
       POSTGRES_DB: postgres
     ports:
       - "5432:5432"
     volumes:
-      - yamlflow_postgres:/var/lib/postgresql/data
+      - etloom_postgres:/var/lib/postgresql/data
       - ./docker/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yamlflow -d postgres"]
+      test: ["CMD-SHELL", "pg_isready -U etloom -d postgres"]
       interval: 2s
       timeout: 3s
       retries: 20
 
 volumes:
-  yamlflow_postgres:
+  etloom_postgres:
 

@@ -3,30 +3,38 @@ requires = ["setuptools>=75", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "yamlflow-etl"
-version = "0.1.0"
-description = "A configuration-driven PostgreSQL ETL engine built with Python and YAML."
+name = "etloom"
+version = "0.2.0"
+description = "A Python-first, YAML-driven PostgreSQL ETL platform with a web control plane."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 authors = [{name = "Mukul Kumar"}]
 dependencies = [
+  "fastapi>=0.115,<1",
+  "jinja2>=3.1,<4",
   "pydantic>=2.8,<3",
   "PyYAML>=6.0,<7",
   "psycopg[binary]>=3.2,<4",
+  "python-multipart>=0.0.12,<1",
+  "uvicorn>=0.32,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3,<9",
+  "httpx>=0.27,<1",
   "ruff>=0.8,<1",
 ]
 
 [project.scripts]
-yamlflow = "yamlflow.cli.main:main"
+etloom = "etloom.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"etloom.web" = ["templates/*.html", "static/css/*.css", "static/js/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

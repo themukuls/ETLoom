@@ -1,0 +1,309 @@
+# ETLoom pipeline contract
+# Copy this file, rename it, and replace the example values for a new pipeline.
+
+api_version: etloom/v1
+kind: pipeline
+
+metadata:
+  id: example_pipeline
+  name: Example Pipeline
+  description: Extracts a PostgreSQL table, validates it, and loads a target table.
+  owner: data-engineering
+  tags:
+    - postgresql
+    - batch
+  enabled: true
+
+# Optional runtime parameters. ETLoom resolves these before execution.
+parameters:
+  processing_date:
+    type: date
+    required: false
+    default: "{{ execution_date }}"
+
+input:
+  type: postgresql
+  connection: source_postgres
+
+  object:
+    schema: source
+    table: source_table
+
+  columns:
+    - id
+    - business_key
+    - amount
+    - refund_amount
+    - status
+    - created_at
+    - updated_at
+
+  # Optional SQL predicate. Write only the WHERE condition, not "WHERE" itself.
+  filter:
+    sql: |
+      status = 'ACTIVE'
+
+  extraction:
+    # Supported modes: full, incremental.
+    mode: incremental
+
+    incremental:
+      strategy: watermark
+      watermark_column: updated_at
+      initial_value: "2026-01-01T00:00:00+00:00"
+      lookback_seconds: 300
+
+      # Prevents records sharing the same watermark from being skipped.
+      tie_breaker:
+        column: id
+
+    order_by:
+      - column: updated_at
+        direction: ascending
+      - column: id
+        direction: ascending
+
+    batch_size: 5000
+    fetch_timeout_seconds: 300
+
+# Transformations run in the listed order.
+transformations:
+  - id: calculate_net_amount
+    type: derive_column
+    output_column: net_amount
+    operation:
+      name: subtract
+      columns:
+        - amount
+        - refund_amount
+      null_handling:
+        refund_amount: 0
+
+  - id: derive_created_date
+    type: derive_column
+    output_column: created_date
+    operation:
+      name: date
+      column: created_at
+
+  - id: remove_duplicate_records
+    type: deduplicate
+    keys:
+      - id
+    retain:
+      order_by: updated_at
+      direction: descending
+
+output:
+  type: postgresql
+  connection: target_postgres
+
+  object:
+    schema: analytics
+    table: target_table
+
+  write:
+    # Supported modes: append, merge, replace.
+    mode: merge
+
+    merge_keys:
+      - id
+
+    # Columns updated when a merge key already exists.
+    update_columns:
+      - business_key
+      - amount
+      - refund_amount
+      - status
+      - created_at
+      - updated_at
+      - net_amount
+      - created_date
+
+    staging:
+      enabled: true
+      schema: etloom_staging
+      table_prefix: example_pipeline
+
+    transaction:
+      atomic: true
+      isolation_level: read_committed
+
+    schema_policy:
+      create_table_if_missing: false
+      allow_new_columns: false
+      allow_missing_columns: false
+      allow_type_changes: false
+
+data_quality:
+  defaults:
+    timeout_seconds: 60
+    on_error: fail
+
+  checks:
+    # Scalar checks return exactly one row containing a named metric.
+    - id: source_has_records
+      name: Source table contains records
+      stage: pre_extract
+      type: scalar_sql
+      connection: source_postgres
+      sql: |
+        SELECT COUNT(*) AS row_count
+        FROM {{ source }}
+      expectation:
+        column: row_count
+        operator: greater_than
+        value: 0
+      severity: error
+      on_failure: fail
+
+    # Failing-row checks return the actual invalid records.
+    - id: required_fields_are_present
+      name: Required fields are populated
+      stage: post_transform
+      type: failing_rows_sql
+      sql: |
+        SELECT *
+        FROM {{ staging }}
+        WHERE id IS NULL
+           OR business_key IS NULL
+      expectation:
+        operator: row_count_equals
+        value: 0
+      severity: error
+      on_failure: quarantine
+
+    - id: amount_is_non_negative
+      name: Amount must not be negative
+      stage: post_transform
+      type: failing_rows_sql
+      sql: |
+        SELECT *
+        FROM {{ staging }}
+        WHERE amount < 0
+      expectation:
+        operator: row_count_equals
+        value: 0
+      severity: error
+      on_failure: quarantine
+
+    - id: primary_key_is_unique
+      name: ID is unique in the staged batch
+      stage: pre_load
+      type: scalar_sql
+      sql: |
+        SELECT COUNT(*) AS duplicate_groups
+        FROM (
+          SELECT id
+          FROM {{ staging }}
+          GROUP BY id
+          HAVING COUNT(*) > 1
+        ) duplicates
+      expectation:
+        column: duplicate_groups
+        operator: equals
+        value: 0
+      severity: error
+      on_failure: fail
+
+    - id: target_has_no_null_keys
+      name: Target contains no null IDs
+      stage: post_load
+      type: scalar_sql
+      connection: target_postgres
+      sql: |
+        SELECT COUNT(*) AS failed_count
+        FROM {{ target }}
+        WHERE id IS NULL
+      expectation:
+        column: failed_count
+        operator: equals
+        value: 0
+      severity: error
+      on_failure: fail
+
+    # Compare checks run independent source and target queries.
+    - id: source_target_reconciliation
+      name: Source and target record counts reconcile
+      stage: reconciliation
+      type: compare_sql
+      source:
+        connection: source_postgres
+        sql: |
+          SELECT COUNT(*) AS record_count
+          FROM {{ source }}
+          WHERE updated_at > {{ previous_watermark }}
+            AND updated_at <= {{ current_watermark }}
+      target:
+        connection: target_postgres
+        sql: |
+          SELECT COUNT(*) AS record_count
+          FROM {{ target }}
+          WHERE updated_at > {{ previous_watermark }}
+            AND updated_at <= {{ current_watermark }}
+      expectation:
+        source_column: record_count
+        target_column: record_count
+        operator: equals
+      severity: error
+      on_failure: fail
+
+quarantine:
+  enabled: true
+  connection: control_postgres
+  object:
+    schema: etloom
+    table: rejected_records
+  include:
+    - pipeline_id
+    - run_id
+    - check_id
+    - rejection_reason
+    - source_record
+    - rejected_at
+
+checkpoint:
+  enabled: true
+  connection: control_postgres
+  update_policy: after_successful_commit
+
+runtime:
+  timeout_seconds: 1800
+
+  retry:
+    enabled: true
+    maximum_attempts: 3
+    initial_delay_seconds: 5
+    backoff_multiplier: 2
+    maximum_delay_seconds: 60
+
+  failure_policy:
+    rollback_target: true
+    preserve_staging_data: true
+    advance_checkpoint: false
+
+  resources:
+    maximum_memory_mb: 1024
+    maximum_parallel_batches: 1
+
+observability:
+  logging:
+    level: INFO
+    format: json
+
+  metrics:
+    enabled: true
+    capture:
+      - extracted_rows
+      - transformed_rows
+      - rejected_rows
+      - inserted_rows
+      - updated_rows
+      - execution_duration_seconds
+      - source_watermark
+      - target_watermark
+
+  audit:
+    enabled: true
+    retain_run_history_days: 90
+
